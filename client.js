@@ -1,48 +1,48 @@
 'use strict';
 const request = require('superagent');
-const co = require('co');
-
+const _ = require('lodash');
+const debug = require('debug')('jt.consul');
+const parallel = require('co-parallel');
 class Client {
 
-  // 构造函数
   /**
    * [constructor description]
-   * @param  {[type]} host [description]
-   * @param  {[type]} port [description]
-   * @param  {[type]} dc   [description]
-   * @return {[type]}      [description]
+   * @param  {[type]} options [description]
+   * @return {[type]}         [description]
    */
-  constructor(host, port, dc) {
-    this.host = host || '127.0.0.1';
-    this.port = port || 8500;
-    this.dc = dc;
+  constructor(options) {
+    options = options || {};
+    this.host = options.host || '127.0.0.1';
+    this.port = options.port || 8500;
+    this.dc = options.dc;
   }
 
   /**
    * [register 注册consul服务]
-   * @param {String} node 服务节点
-   * @param {String} service 服务名称
-   * @param {String} address 服务地址
-   * @param {Number} port 服务端口
-   * @param {Array} tags 服务tags
+   * @param  {[type]} options [description]
+   * @param  {[type]} checkOptions
+   * @return {[type]}         [description]
    */
-  * register(node, service, address, port, tags) {
+  * register(options, checkOptions) {
     let data = {
-      Node: node,
-      Address: address,
+      Node: options.id,
+      Address: options.address,
       Service: {
-        ID: node,
-        Service: service,
-        Port: port,
-        Address: address,
-        tags: tags
+        ID: options.id,
+        Service: options.service,
+        Port: options.port,
+        Address: options.address,
+        tags: options.tags
       }
     };
     if (this.dc) {
       data.Datacenter = this.dc;
     }
-    let url = 'http://' + this.host + ':' + this.port +
-      '/v1/catalog/register';
+    if (checkOptions) {
+      data.Check = checkOptions;
+    }
+    let url = this.url('register');
+    debug('register %s, data:%j', url, data);
     yield put(url, data);
   }
 
@@ -57,9 +57,108 @@ class Client {
     if (this.dc) {
       data.Datacenter = this.dc;
     }
-    let url = 'http://' + this.host + ':' + this.port +
-      '/v1/catalog/deregister';
+    let url = this.url('deregister');
+    debug('deregister %s, data:%j', url, data);
     yield put(url, data);
+  }
+
+
+  /**
+   * [list 列出该服务的所有节点信息]
+   * @param {String} node 服务节点
+   * @return {[type]}     [description]
+   */
+  * list(serviceName) {
+    let url = this.url('service', serviceName);
+    let res = yield get(url);
+    return _.map(res.body, function(item) {
+      let tmp = {
+        name: item.ServiceName,
+        ip: item.ServiceAddress,
+        port: item.ServicePort,
+        id: item.ServiceID
+      };
+      let prefixKey = 'prefix:';
+      let hostKey = 'host:';
+      _.forEach(item.ServiceTags, function(tag) {
+        if (tag.indexOf(prefixKey) === 0) {
+          tmp.prefix = tag.substring(prefixKey.length);
+        } else if (tag.indexOf(hostKey) === 0) {
+          tmp.host = tag.substring(hostKey.length);
+        }
+      });
+      return tmp;
+    });
+  }
+
+  /**
+   * [listByTags 根据tags，列出所有节点信息]
+   * @param {String, Array} tags
+   * @return {[type]}     [description]
+   */
+  * listByTags(tags) {
+    if (!_.isArray(tags)) {
+      tags = [tags];
+    }
+    let url = this.url('services');
+    let res = yield get(url);
+    let services = [];
+    _.forEach(res.body, function(serviceTags, name) {
+      _.forEach(tags, function(tag) {
+        if (_.indexOf(serviceTags, tag) !== -1) {
+          services.push(name);
+        }
+      });
+    });
+    services = _.uniq(services);
+    let fns = services.map(this.list.bind(this));
+    let result = yield parallel(fns);
+    return _.flattenDeep(result);
+  }
+
+  // * checkRegister(data) {
+  //   let url = this.url('checkRegister');
+  //   let res = yield put(url, data);
+  //   console.dir(res)
+  // }
+  //
+  // * checkDeregister(checkId) {
+  //   let url = this.url('checkDeregister', checkId);
+  //   let res = yield get(url);
+  //   console.dir(res);
+  // }
+
+  /**
+   * [url 根据类型返回url]
+   * @param  {[type]} type [description]
+   * @param  {[type]} type [description]
+   * @return {[type]}      [description]
+   */
+  url(type, name) {
+    let url = 'http://' + this.host + ':' + this.port;
+    switch (type) {
+      case 'register':
+        url += '/v1/catalog/register';
+        break;
+      case 'deregister':
+        url += '/v1/catalog/deregister';
+        break;
+      case 'service':
+        url += '/v1/catalog/service/' + name;
+        break;
+      case 'services':
+        url += '/v1/catalog/services';
+        break;
+      case 'checkRegister':
+        url += '/v1/agent/check/register';
+        break;
+      case 'checkDeregister':
+        url += '/v1/agent/check/deregister/' + name;
+        break;
+      default:
+        throw new Error('Not support default value');
+    }
+    return url;
   }
 }
 
@@ -69,10 +168,27 @@ class Client {
  * @param  {[type]} argument [description]
  * @return {[type]}          [description]
  */
-function* put(url, data) {
-
-  return yield new Promise(function(resolve, reject) {
+function put(url, data) {
+  return new Promise(function(resolve, reject) {
     request.put(url).send(data).end(function(err, res) {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(res);
+      }
+    });
+  });
+}
+
+
+/**
+ * [get description]
+ * @param  {[type]} url [description]
+ * @return {[type]}     [description]
+ */
+function get(url) {
+  return new Promise(function(resolve, reject) {
+    request.get(url).end(function(err, res) {
       if (err) {
         reject(err);
       } else {
