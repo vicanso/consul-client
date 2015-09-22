@@ -1,7 +1,7 @@
 {
   "name": "consul-simple-client",
   "description": "node.js client for consul",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "author": {
     "name": "vicanso 小墨鱼",
     "email": "vicansocanbico@gmail.com"

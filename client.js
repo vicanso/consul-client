@@ -24,6 +24,8 @@ class Client {
    * @return {[type]}         [description]
    */
   * register(options, checkOptions) {
+    let tags = options.tags || [];
+    tags.push('createdAt:' + Date.now());
     let data = {
       Node: options.id,
       Address: options.address,
@@ -32,7 +34,7 @@ class Client {
         Service: options.service,
         Port: options.port,
         Address: options.address,
-        tags: options.tags
+        tags: tags
       }
     };
     if (this.dc) {
@@ -76,7 +78,8 @@ class Client {
         name: item.ServiceName,
         ip: item.ServiceAddress,
         port: item.ServicePort,
-        id: item.ServiceID
+        id: item.ServiceID,
+        tags: item.ServiceTags
       };
       let prefixKey = 'prefix:';
       let hostKey = 'host:';
