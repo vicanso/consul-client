@@ -81,13 +81,14 @@ class Client {
         id: item.ServiceID,
         tags: item.ServiceTags
       };
-      let prefixKey = 'prefix:';
-      let hostKey = 'host:';
       _.forEach(item.ServiceTags, function(tag) {
-        if (tag.indexOf(prefixKey) === 0) {
-          tmp.prefix = tag.substring(prefixKey.length);
-        } else if (tag.indexOf(hostKey) === 0) {
-          tmp.host = tag.substring(hostKey.length);
+        let index = tag.indexOf(':');
+        if (index !== -1) {
+          let key = tag.substring(0, index);
+          let value = tag.substring(index + 1);
+          if (!tmp[key]) {
+            tmp[key] = value;
+          }
         }
       });
       return tmp;
@@ -116,7 +117,11 @@ class Client {
     services = _.uniq(services);
     let fns = services.map(this.list.bind(this));
     let result = yield parallel(fns);
-    return _.flattenDeep(result);
+    result = _.flattenDeep(result);
+    result = _.sortBy(result, function(backend) {
+      return backend.name;
+    });
+    return result;
   }
 
   // * checkRegister(data) {
